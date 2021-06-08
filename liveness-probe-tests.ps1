@@ -1,6 +1,12 @@
 param(
     [Parameter(Mandatory = $False)]
-    [PSCustomObject[]]$servicesEndpoints,
+    [System.String]$protocol,
+    [Parameter(Mandatory = $False)]
+    [System.String]$service,
+    [Parameter(Mandatory = $False)]
+    [System.String]$port,
+    [Parameter(Mandatory = $False)]
+    [System.String]$endpoint,
     [Parameter(Mandatory = $False)]
     [System.String]$expectedStatusCode,
     [Parameter(Mandatory = $False)]
@@ -29,29 +35,19 @@ function Test-Self-Check-DNS {
     until ($dnsIsOk)
 }
 function Test-Service-Responds-As-Expected {
-    $jsonServices = ConvertTo-Json servicesEndpoints -Depth 100
-    Write-Host "JSON services."$jsonServices
     Write-Host "Testing if service issue is present."
-    Write-Host "parameter services endpoints" $servicesEndpoints
-    Write-Host "services endpoints type" $servicesEndpoints.GetType().FullName
-    Write-Host "services length" $servicesEndpoints.Length
-     for ($i = 0; $i -lt $servicesEndpoints.Length; $i++) {
-         
-        Write-Host "service port" $servicesEndpoints[$i].port 
-        Write-Host "service url" $servicesEndpoints[$i].url
-        Write-Host "service urlWithPort" $servicesEndpoints[$i].urlWithPort
+
         try {
-            $serviceStatusCode = Invoke-WebRequest -Uri $servicesEndpoints[$i].urlWithPort -Verbose -UseBasicParsing | Select-Object -Expand StatusCode
-            Write-Host "Output! Response status code for service endpoint" $servicesEndpoints[$i].url "is:" $serviceStatusCode
-            if ($serviceStatusCode -eq $serviceEndpoint[$i].expectedStatusCode) {
-                Write-Host "Service status check for service endpoint $serviceEndpoint SUCCESS!"
+            $serviceStatusCode = Invoke-WebRequest -Uri $endpoint -Verbose -UseBasicParsing | Select-Object -Expand StatusCode
+            Write-Host "Output! Response status code for service endpoint" $endpoint "is:" $serviceStatusCode
+            if ($serviceStatusCode -eq $expectedStatusCode) {
+                Write-Host "Service status check for service endpoint $endpoint SUCCESS!"
             }
         }
         catch {
             $_.Exception.Response.StatusCode.Value__
-            Write-Host "Service status check for service $serviceEndpoint FAILED!"
-        }
-    }
+            Write-Host "Service status check for service $endpoint FAILED!"
+        }    
 }
 
 function Test-Port-Is-Opened {
@@ -110,8 +106,8 @@ function Test-Service-Responds-As-Expected-By-IP {
     }
 }
 
-#Test-Self-Check-DNS
-Test-Service-Responds-As-Expected -ServicesEndpoints $servicesEndpoints
-#Test-Port-Is-Opened -Service $service -Port $port -PortExpectedResult $portExpectedResult
-#Test-Domain-Address-Is-Resolved -Service $service
-#Test-Service-Responds-As-Expected-By-IP -Protocol $protocol -Service $service -Port $port -ExpectedStatusCode $expectedStatusCode
+Test-Self-Check-DNS
+Test-Service-Responds-As-Expected -Endpoint $endpoint -ExpectedStatusCode $expectedStatusCode
+Test-Port-Is-Opened -Service $service -Port $port -PortExpectedResult $portExpectedResult
+Test-Domain-Address-Is-Resolved -Service $service
+Test-Service-Responds-As-Expected-By-IP -Protocol $protocol -Service $service -Port $port -ExpectedStatusCode $expectedStatusCode
