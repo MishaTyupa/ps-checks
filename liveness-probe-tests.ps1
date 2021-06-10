@@ -32,7 +32,7 @@ function Get-Parsed-Url {
 function Test-Self-Check-DNS {
     Write-Host "Testing if dns issue is present."
     $dnsIsOk = $False
-
+    
     try {
         [System.Net.Dns]::GetHostEntry("kube-dns.kube-system.svc.cluster.local")
         $dnsIsOk = $True
@@ -53,16 +53,20 @@ function Test-Service-Responds-By-Domain-Url {
 
     Write-Host "Testing if service issue is present."
     $serviceIsOk = $False
+    $resultsArray = @()
     try {
         for ($i = 0; $i -lt $parsedUrlCollection.Length; $i++) {
             $serviceStatus = Invoke-WebRequest -Uri $parsedUrlCollection[$i] -Verbose -UseBasicParsing 
             $serviceStatusCode = $serviceStatus | Select-Object -Expand StatusCode
             $serviceMatch = $serviceStatus.Content | Select-String -Pattern $ExpectedContentCollection[$i] | Select-Object -ExpandProperty Matches -First 1
-            Write-Host "Output! Response status code for service endpoint" $parsedUrlCollection[$i]"is:" $serviceStatusCode
-            if ($serviceStatusCode -eq 200 -And $serviceMatch -contains $ExpectedContentCollection[$i]) {
-                Write-Host "Service status check for service endpoint" $parsedUrlCollection[$i] "SUCCESS!"
-                $serviceIsOk = $True
+            if ($serviceStatusCode -eq 200 -And $serviceMatch.Value -eq $ExpectedContentCollection[$i]) {
+                $resultsArray += $True
+            } else {
+                $resultsArray += $False
             }
+        }
+        if (!($resultsArray -contains $False)) {
+            $serviceIsOk = $True
         }
     }
     catch {
