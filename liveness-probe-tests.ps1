@@ -1,113 +1,167 @@
 param(
     [Parameter(Mandatory = $False)]
-    [System.String]$protocol,
-    [Parameter(Mandatory = $False)]
-    [System.String]$service,
-    [Parameter(Mandatory = $False)]
-    [System.String]$port,
-    [Parameter(Mandatory = $False)]
-    [System.String]$endpoint,
-    [Parameter(Mandatory = $False)]
-    [System.String]$expectedStatusCode,
-    [Parameter(Mandatory = $False)]
-    [System.String]$portExpectedResult
+    [System.Object[]]$endpoints
 )
+
+function Get-Parsed-Url {
+    param(
+        [Parameter(Mandatory = $True)]
+        [string[]]$UrlCollection,
+        [Parameter(Mandatory = $True)]
+        [string[]]$ExpectedContentCollection
+    )
+
+    $urlArray = @()
+
+    for ($i = 0; $i -lt $UrlCollection.Length; $i++) {
+        $Uri = [System.Uri]::new($UrlCollection[$i])
+        $ExpectedContent = $ExpectedContentCollection[$i]
+        $urlObject = [PSCustomObject]@{
+            Host            = $Uri.Host
+            Port            = $Uri.Port
+            DnsSafeHost     = $Uri.DnsSafeHost
+            AbsoluteUri     = $Uri.AbsoluteUri
+            Protocol        = $Uri.Scheme + "://"
+            ExpectedContent = $ExpectedContent
+        }
+        $urlArray += $urlObject
+    }
+    return $urlArray
+}
 
 function Test-Self-Check-DNS {
     Write-Host "Testing if dns issue is present."
-    $timerDns = [Diagnostics.Stopwatch]::StartNew();
-    $dnsTimeoutInMinutes = 1
     $dnsIsOk = $False
-    do {
-        Start-Sleep -s 5
-        try {
-            [System.Net.Dns]::GetHostEntry("kube-dns.kube-system.svc.cluster.local")
-            Write-Host "Dns is resolved!SUCCESS!"
-        }
-        catch {
-            if ($timerDns.Elapsed.TotalMinutes -lt $dnsTimeoutInMinutes) {
-                continue
-            }
-            Write-Host "Dns issue is present!FAILED!"
-        }
+
+    try {
+        [System.Net.Dns]::GetHostEntry("kube-dns.kube-system.svc.cluster.local")
         $dnsIsOk = $True
     }
-    until ($dnsIsOk)
+    catch {
+        Write-Host $_.ScriptStackTrace
+    }
+    return $dnsIsOk
 }
-function Test-Service-Responds-As-Expected {
-    Write-Host "Testing if service issue is present."
 
-        try {
-            $serviceStatusCode = Invoke-WebRequest -Uri $endpoint -Verbose -UseBasicParsing | Select-Object -Expand StatusCode
-            Write-Host "Output! Response status code for service endpoint" $endpoint "is:" $serviceStatusCode
-            if ($serviceStatusCode -eq $expectedStatusCode) {
-                Write-Host "Service status check for service endpoint $endpoint SUCCESS!"
+function Test-Service-Responds-By-Domain-Url {
+    param(
+        [Parameter(Mandatory = $True)]
+        [string[]]$parsedUrlCollection,
+        [Parameter(Mandatory = $True)]
+        [string[]]$ExpectedContentCollection
+    )
+
+    Write-Host "Testing if service issue is present."
+    $serviceIsOk = $False
+    try {
+        for ($i = 0; $i -lt $parsedUrlCollection.Length; $i++) {
+            $serviceStatus = Invoke-WebRequest -Uri $parsedUrlCollection[$i] -Verbose -UseBasicParsing 
+            $serviceStatusCode = $serviceStatus | Select-Object -Expand StatusCode
+            $serviceMatch = $serviceStatus.Content | Select-String -Pattern $ExpectedContentCollection[$i] | Select-Object -ExpandProperty Matches -First 1
+            Write-Host "Output! Response status code for service endpoint" $parsedUrlCollection[$i]"is:" $serviceStatusCode
+            if ($serviceStatusCode -eq 200 -And $serviceMatch -contains $ExpectedContentCollection[$i]) {
+                Write-Host "Service status check for service endpoint" $parsedUrlCollection[$i] "SUCCESS!"
+                $serviceIsOk = $True
             }
         }
-        catch {
-            $_.Exception.Response.StatusCode.Value__
-            Write-Host "Service status check for service $endpoint FAILED!"
-        }    
+    }
+    catch {
+        $_.Exception.Response.StatusCode.Value__
+    }
+    return $serviceIsOk    
 }
 
 function Test-Port-Is-Opened {
+    param(
+        [Parameter(Mandatory = $True)]
+        [string]$service,
+        [Parameter(Mandatory = $True)]
+        [string]$port
+    )
+
     Write-Host "Passed parameters for service and port are: $service $port"
     Write-Host "Testing if port issue is present."
+    $portIsOpened = $False
 
     $portStatus = nc -z -v -w5 $service $port 2>&1
 
     Write-Host "Output! Port status is: $portStatus"
     $portMatch = $portStatus | Select-String $portExpectedResult
     if (![string]::IsNullOrEmpty($portMatch)) {
-        Write-Host "Port $port is opened!SUCCESS!" 
+        Write-Host "Port $port is opened!SUCCESS!"
+        $portIsOpened = $True
     }
-    else {
-        Write-Host "Port $port is closed!FAILED! "
-    }
+    return $portIsOpened
 }
 
 function Test-Domain-Address-Is-Resolved {
-    [ref]$ValidIP = [ipaddress]::None
-    $serviceFullName = $service + ".default.svc.cluster.local"
-    $serviceDNSValue = "Address"
+    param(
+        [Parameter(Mandatory = $True)]
+        [string]$service
+    )
 
     Write-Host "Testing if domain issue is present."
 
-    $dnsCollection = busybox nslookup $serviceFullName
+    [ref]$ValidIP = [ipaddress]::None
+    $serviceDNSValue = "Address"
+    $domainIsResolved = $False
+     
+    $dnsCollection = busybox nslookup $service
 
     ForEach ($dns in (1..($dnsCollection.Count - 1))) {
-        if ($dnsCollection[$dns - 1].Contains($serviceFullName) -And $dnsCollection[$dns].Contains($serviceDNSValue)) {
+        if ($dnsCollection[$dns - 1].Contains($service) -And $dnsCollection[$dns].Contains($serviceDNSValue)) {
             $script:ip = $dnsCollection[$dns].Split(":")[1].Trim()
         }
     }
 
     if (![string]::IsNullOrEmpty($ip) -And [ipaddress]::TryParse($ip, $ValidIP)) {
         Write-Host "Domain name is mapped to IP Address!Ip status is: $ip. SUCCESS!" 
+        $domainIsResolved = $True
     }
-    else {
-        Write-Host "Domain name is NOT mapped to IP Address!Ip status is: $ip or empty. FAILED!"
-    }
+
+    return $domainIsResolved
 }
 
 function Test-Service-Responds-As-Expected-By-IP {
+    $serviceIsOk = $False
     $address = $protocol + $ip + ":" + $port
-    $ipStatusCode = Invoke-WebRequest -Uri $address -Verbose -UseBasicParsing | Select-Object -Expand StatusCode
+    $ipStatus = Invoke-WebRequest -Uri $address -Verbose -UseBasicParsing
+    $ipStatusCode = $ipStatus | Select-Object -Expand StatusCode
+    $ipMatch = $ipStatus | Select-String $expectedContent
     Write-Host "Testing if service IP issue is present."
 
     Write-Host "Output! Response status code by IP $ip is:" $ipStatusCode
 
-    if ($ipStatusCode -eq $expectedStatusCode) {
+    if ($ipStatusCode -eq $expectedStatusCode -And $ipMatch -eq $expectedContent) {
         Write-Host "Service responds as expected directly by ip for service $service. SUCCESS!"
-        exit 0 
+        $serviceIsOk = $True
     }
-    else {
-        Write-Host "Service failed to respond as expected directly by ip for service $service. FAILED!"
-        exit 1
-    }
+    return $serviceIsOk
 }
 
-Test-Self-Check-DNS
-Test-Service-Responds-As-Expected -Endpoint $endpoint -ExpectedStatusCode $expectedStatusCode
-Test-Port-Is-Opened -Service $service -Port $port -PortExpectedResult $portExpectedResult
-Test-Domain-Address-Is-Resolved -Service $service
-Test-Service-Responds-As-Expected-By-IP -Protocol $protocol -Service $service -Port $port -ExpectedStatusCode $expectedStatusCode
+$results = @();
+$parsedUrlCollection = Get-Parsed-Url -UrlCollection $endpoints.Url -ExpectedContentCollection $endpoints.ExpectedContent
+
+#$IsSelfDnsOk = Test-Self-Check-DNS 
+#Write-Host "DNS selfsheck: $IsSelfDnsOk"
+#$results.Add($IsSelfDnsOk)
+
+$isServiceRespondsByUrl = Test-Service-Responds-By-Domain-Url -ParsedUrlCollection $parsedUrlCollection.AbsoluteUri -ExpectedContentCollection $parsedUrlCollection.ExpectedContent
+Write-Host "Endpoints check: $isServiceRespondsByUrl"
+$results += $isServiceRespondsByUrl
+
+#$finalResult = $results -Filter 
+#$isServicePortOpened = Test-Port-Is-Opened -Service $parsedUrl.DnsSafeHost -Port $parsedUrl.Port
+#Write-Host "Ports check: $isServicePortOpened"
+#$results.Add($isPortOpened)
+
+#$isServiceDomainResolved = Test-Domain-Address-Is-Resolved -Service $parsedUrl.DnsSafeHost
+#Write-Host "Domains checks: $isServiceDomainResolved"
+#$results.Add($isServiceDomainResolved)
+
+#$isServiceRespondsDirectlyByIp = Test-Service-Responds-As-Expected-By-IP -Protocol $parsedUrl.Protocol -Service $parsedUrl.DnsSafeHost -Port $parsedUrl.Port
+#Write-Host "IP addresses check: $isServiceRespondsDirectlyByIp"
+#$results.Add($isServiceRespondsDirectlyByIp)
+
+##### LOGS #####
+#$logs
