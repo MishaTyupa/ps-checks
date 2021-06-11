@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ps-checks-pod
+  labels:
+    app: ps-checks
+spec:
+  containers:
+  - name: ps-checks-container
+    image: miketyupa/ps-checks:2.0.80
+    command: ['sh', '-c', 'echo The app is running! && sleep 360000']
+  nodeSelector:
+     beta.kubernetes.io/os: linux
+  tolerations: 
+  - effect: NoSchedule
+    key: "cattle.io/os"
+    operator: Equal
+    value: linux

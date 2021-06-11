@@ -47,12 +47,13 @@ function Exit-Program($finalResult) {
 }
 
 function Show-Logs($gatheredLogs) {
-    Write-Host "DNS Self-Check Logs:" $gatheredLogs.dnsSelfCheckLogs
-    Write-Host "Services Check Logs:" $gatheredLogs.servicesCheckLogs
-    Write-Host "Port Check Logs:" $gatheredLogs.portCheckLogs
-    Write-Host "Domain Check Logs:" $gatheredLogs.domainCheckLogs
-    Write-Host "Address Check Logs:" $gatheredLogs.addressCheckLogs
+  foreach ($log in $gatheredLogs) {
+      if(![string]::IsNullOrEmpty($log)){
+          Write-Host "Error logs:" $log
+      }
+  }
 }
+
 function Get-Response-Details($endpoint) {
     $responseDetails = @{}
     $endpointStatus = Invoke-WebRequest -Uri $endpoint -Verbose -UseBasicParsing 
@@ -64,7 +65,6 @@ function Get-Response-Details($endpoint) {
 }
 
 function Test-Self-Check-DNS {
-    $script:logs = @{}
     Write-Host "Testing if dns issue is present."
     $dnsIsOk = $False
 
@@ -73,7 +73,7 @@ function Test-Self-Check-DNS {
         $dnsIsOk = $True
     }
     catch {
-        $logs.dnsSelfCheckLogs += $_.ScriptStackTrace
+        $script:logs += $_.ScriptStackTrace
     }
     return $dnsIsOk
 }
@@ -89,7 +89,7 @@ function Test-Service-Responds-By-Domain-Url {
     Write-Host "Testing if service issue is present."
 
     $resultsArray = @()
-
+    $serviceIsOk = $False
     try {
         for ($i = 0; $i -lt $UrlCollection.Length; $i++) {
             $responseDetails = Get-Response-Details($UrlCollection[$i])
@@ -103,7 +103,7 @@ function Test-Service-Responds-By-Domain-Url {
         $serviceIsOk = Get-Final-Result($resultsArray) 
     }
     catch {
-        $logs.servicesCheckLogs += $_.Exception.Response.StatusCode.Value__
+        $script:logs += $_.Exception.Response.StatusCode.Value__
     }
     return $serviceIsOk    
 }
@@ -111,18 +111,18 @@ function Test-Service-Responds-By-Domain-Url {
 function Test-Port-Is-Opened {
     param(
         [Parameter(Mandatory = $True)]
-        [string[]]$servicesCollection,
+        [string[]]$ServicesCollection,
         [Parameter(Mandatory = $True)]
-        [string[]]$portsCollection
+        [string[]]$PortsCollection
     )
 
     Write-Host "Testing if port issue is present."
 
     $resultsArray = @()
-
+    $portIsOk = $False
     try {
-        for ($i = 0; $i -lt $portsCollection.Length; $i++) {
-            $portStatus = nc -z -v -w5 $servicesCollection[$i] $portsCollection[$i] 2>&1
+        for ($i = 0; $i -lt $PortsCollection.Length; $i++) {
+            $portStatus = nc -z -v -w5 $ServicesCollection[$i] $PortsCollection[$i] 2>&1
 
             Write-Host "Output! Port status is: $portStatus"
 
@@ -137,7 +137,7 @@ function Test-Port-Is-Opened {
         $portIsOk = Get-Final-Result($resultsArray)
     }
     catch {
-        $logs.portCheckLogs += $_.ScriptStackTrace
+        $script:logs += $_.ScriptStackTrace
     }
     return $portIsOk
 }
@@ -145,22 +145,21 @@ function Test-Port-Is-Opened {
 function Test-Domain-Address-Is-Resolved {
     param(
         [Parameter(Mandatory = $True)]
-        [string[]]$servicesCollection
+        [string[]]$ServicesCollection
     )
 
     Write-Host "Testing if domain issue is present."
-    $script:ipAddresses = @()
     $resultsArray = @()
     [ref]$ValidIP = [ipaddress]::None
     $serviceDNSValue = "Address"
-
+    $domainIsOk = $False
     try {
-        for ($i = 0; $i -lt $servicesCollection.Length; $i++) {
-            $dnsCollection = nslookup $servicesCollection[$i]
+        for ($i = 0; $i -lt $ServicesCollection.Length; $i++) {
+            $dnsCollection = nslookup $ServicesCollection[$i]
 
             ForEach ($dns in (1..($dnsCollection.Count - 1))) {
-                if ($dnsCollection[$dns - 1].Contains($servicesCollection[$i]) -And $dnsCollection[$dns].Contains($serviceDNSValue)) {
-                    $ipAddresses += $dnsCollection[$dns].Split(":")[1].Trim()
+                if ($dnsCollection[$dns - 1].Contains($ServicesCollection[$i]) -And $dnsCollection[$dns].Contains($serviceDNSValue)) {
+                    $script:ipAddresses += $dnsCollection[$dns].Split(":")[1].Trim()
                 }
             }
     
@@ -174,7 +173,7 @@ function Test-Domain-Address-Is-Resolved {
         $domainIsOk = Get-Final-Result($resultsArray)     
     }
     catch {
-        $logs.domainCheckLogs += $_.ScriptStackTrace
+        $script:logs += $_.ScriptStackTrace
     }
     return $domainIsOk
 }
@@ -189,12 +188,13 @@ function Test-Service-Responds-As-Expected-By-IP {
         [string[]]$ExpectedContentCollection
     )
     $resultsArray = @()
-
+    $addressIsOk = $False
     try {
         Write-Host "Testing if Address issue is present."
 
         for ($i = 0; $i -lt $PortsCollection.Length; $i++) {
             $address = $ProtocolsCollection[$i] + $ipAddresses[$i] + ":" + $PortsCollection[$i]
+            Write-Host "Output! Service Address is: $address"
             $responseDetails = Get-Response-Details($address)
             if ($responseDetails.endpointStatusCode -eq 200 -And $responseDetails.endpointMatchValue -eq $ExpectedContentCollection[$i]) {
                 $resultsArray += $True
@@ -206,32 +206,34 @@ function Test-Service-Responds-As-Expected-By-IP {
         $addressIsOk = Get-Final-Result($resultsArray)  
     }
     catch {
-        $logs.addressCheckLogs += $_.ScriptStackTrace
+        $script:logs += $_.ScriptStackTrace
     }
     return $addressIsOk
 }
 
 $results = @();
+$logs = @();
+$ipAddresses = @();
 $parsedUrlCollection = Get-Parsed-Url -UrlCollection $endpoints.Url -ExpectedContentCollection $endpoints.ExpectedContent
 
 $IsSelfDnsOk = Test-Self-Check-DNS 
-Write-Host "DNS OK: $IsSelfDnsOk"
+Write-Host "DNS is OK: $IsSelfDnsOk"
 $results += $IsSelfDnsOk
 
 $isServiceOk = Test-Service-Responds-By-Domain-Url -UrlCollection $parsedUrlCollection.AbsoluteUri -ExpectedContentCollection $parsedUrlCollection.ExpectedContent
-Write-Host "Endpoints OK: $isServiceOk"
+Write-Host "Endpoints are OK: $isServiceOk"
 $results += $isServiceOk
 
 $isPortOk = Test-Port-Is-Opened -ServicesCollection $parsedUrlCollection.DnsSafeHost -PortsCollection $parsedUrlCollection.Port
-Write-Host "Ports OK: $isPortOk"
+Write-Host "Ports are OK: $isPortOk"
 $results += $isPortOk
 
 $isDomainOk = Test-Domain-Address-Is-Resolved -ServicesCollection $parsedUrlCollection.DnsSafeHost
-Write-Host "Domains OK: $isDomainOk"
+Write-Host "Domains are OK: $isDomainOk"
 $results += $isDomainOk
 
 $isAddressOk = Test-Service-Responds-As-Expected-By-IP -ProtocolsCollection $parsedUrlCollection.Protocol -PortsCollection $parsedUrlCollection.Port -ExpectedContentCollection $parsedUrlCollection.ExpectedContent
-Write-Host "IP addresses OK: $isAddressOk"
+Write-Host "IP addresses are OK: $isAddressOk"
 $results += $isAddressOk
 
 $finalResult = Get-Final-Result($results)
