@@ -56,9 +56,9 @@ function Show-Logs($gatheredLogs) {
 
 function Get-Response-Details($endpoint) {
     $responseDetails = @{}
-    $endpointStatus = Invoke-WebRequest -Uri $endpoint -Verbose -UseBasicParsing 
+    $endpointStatus = Invoke-WebRequest -Uri $endpoint -Verbose -UseBasicParsing
     $endpointStatusCode = $endpointStatus | Select-Object -Expand StatusCode
-    $endpointMatch = $endpointStatus.Content | Select-String -Pattern $ExpectedContentCollection[$i] | Select-Object -ExpandProperty Matches -First 1
+    $endpointMatch = $endpointStatus.RawContent | Select-String -Pattern $ExpectedContentCollection[$i] | Select-Object -ExpandProperty Matches -First 1
     $responseDetails.endpointStatusCode += $endpointStatusCode
     $responseDetails.endpointMatchValue += $endpointMatch.Value
     return $responseDetails
