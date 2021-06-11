@@ -10,6 +10,6 @@ RUN dpkg -i packages-microsoft-prod.deb && apt-get update && apt-get install -y 
 RUN install_log=$(apt-get --yes install default-mysql-client); \
     if [[ $? != 0 ]]; then echo "Error occurred during installation of MySQL client: $install_log" >> tests.out; fi;
 
-COPY ./liveness-probe-tests.ps1 /
+COPY ./http-endpoint-tests.ps1 /
 
-ENTRYPOINT ["pwsh", "/liveness-probe-tests.ps1"]
+ENTRYPOINT ["pwsh", "-command"]
